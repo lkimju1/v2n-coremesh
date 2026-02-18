@@ -1,0 +1,19 @@
+rules:
+  - name: baidu-via-naive-a
+    domain:
+      - domain:baidu.com
+      - domain:www.baidu.com
+    outbound_tag: core-naive-a
+
+  - name: qq-via-naive-b
+    domain:
+      - domain:qq.com
+      - domain:im.qq.com
+    outbound_tag: core-naive-b
+
+  - name: cn-direct
+    domain:
+      - geosite:cn
+    outbound_tag: direct
+
+default_outbound_tag: direct

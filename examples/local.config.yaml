@@ -1,0 +1,21 @@
+app:
+  work_dir: ./runtime
+  generated_xray_config: ./runtime/xray.generated.json
+
+xray:
+  bin: /bin/echo
+  base_config: ./examples/xray.base.json
+  args: ["run", "-c", "{{config}}"]
+
+cores:
+  - name: core-a
+    type: custom
+    bin: /bin/echo
+    config: ./examples/core-a.json
+    listen:
+      host: 127.0.0.1
+      port: 11080
+    args: ["{{config}}"]
+    outbound_tag: core-a
+
+routing_rules_file: ./examples/local.rules.yaml

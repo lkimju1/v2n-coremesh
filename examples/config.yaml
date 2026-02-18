@@ -1,0 +1,21 @@
+app:
+  work_dir: ./runtime
+  generated_xray_config: ./runtime/xray.generated.json
+
+xray:
+  bin: /path/to/xray
+  base_config: ./examples/xray.base.json
+  args: ["run", "-c", "{{config}}"]
+
+cores:
+  - name: naive-a
+    type: naive
+    bin: /path/to/naiveproxy
+    config: /path/to/naive-a.json
+    listen:
+      host: 127.0.0.1
+      port: 11080
+    args: ["{{config}}"]
+    outbound_tag: core-naive-a
+
+routing_rules_file: ./examples/rules.yaml

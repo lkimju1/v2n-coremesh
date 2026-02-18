@@ -1,0 +1,6 @@
+rules:
+  - name: rule-a
+    domain:
+      - domain:example.com
+    outbound_tag: core-a
+default_outbound_tag: direct

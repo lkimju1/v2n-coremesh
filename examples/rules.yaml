@@ -1,0 +1,8 @@
+rules:
+  - name: baidu-via-naive-a
+    domain:
+      - domain:baidu.com
+      - geosite:cn
+    outbound_tag: core-naive-a
+
+default_outbound_tag: direct

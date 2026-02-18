@@ -1,0 +1,54 @@
+{
+  "inbounds": [
+    {
+      "listen": "127.0.0.1",
+      "port": 10808,
+      "protocol": "socks",
+      "settings": {
+        "udp": true
+      },
+      "tag": "socks-in"
+    }
+  ],
+  "log": {
+    "loglevel": "warning"
+  },
+  "outbounds": [
+    {
+      "protocol": "freedom",
+      "tag": "direct"
+    },
+    {
+      "protocol": "blackhole",
+      "tag": "block"
+    },
+    {
+      "protocol": "socks",
+      "settings": {
+        "servers": [
+          {
+            "address": "127.0.0.1",
+            "port": 11080
+          }
+        ]
+      },
+      "tag": "core-a"
+    }
+  ],
+  "routing": {
+    "rules": [
+      {
+        "domain": [
+          "domain:example.com"
+        ],
+        "outboundTag": "core-a",
+        "type": "field"
+      },
+      {
+        "network": "tcp,udp",
+        "outboundTag": "direct",
+        "type": "field"
+      }
+    ]
+  }
+}
