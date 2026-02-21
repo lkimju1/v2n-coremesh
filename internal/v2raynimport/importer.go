@@ -87,6 +87,7 @@ func LoadFromHome(home string) (*config.File, *config.Routing, error) {
 	customProfiles := filterCustomProfiles(profiles)
 	cores := make([]config.Core, 0, len(customProfiles))
 	remarkToTag := make(map[string]string)
+	aliasUseCount := make(map[string]int)
 	for _, p := range customProfiles {
 		coreType := int64(coreTypeXray)
 		if p.CoreType.Valid {
@@ -105,22 +106,30 @@ func LoadFromHome(home string) (*config.File, *config.Routing, error) {
 		if err != nil {
 			return nil, nil, fmt.Errorf("infer listen for profile %s(%s): %w", p.IndexID, strings.TrimSpace(p.Remarks.String), err)
 		}
-		outTag := "core-" + sanitizeTag(p.IndexID)
 		name := strings.TrimSpace(p.Remarks.String)
 		if name == "" {
 			name = p.IndexID
 		}
+		alias := uniqueAlias(aliasUseCount, sanitizeTag(name))
+		isActive := guiCfg != nil && strings.EqualFold(strings.TrimSpace(guiCfg.IndexID), strings.TrimSpace(p.IndexID))
 		cores = append(cores, config.Core{
+			ProfileID:   p.IndexID,
 			Name:        name,
+			Alias:       alias,
 			Type:        strconv.FormatInt(coreType, 10),
 			Bin:         binPath,
 			Config:      cfgPath,
 			Listen:      config.Listen{Host: listenHost, Port: listenPort},
 			Args:        args,
-			OutboundTag: outTag,
+			OutboundTag: alias,
+			Active:      isActive,
 		})
-		if strings.TrimSpace(p.Remarks.String) != "" {
-			remarkToTag[strings.TrimSpace(p.Remarks.String)] = outTag
+		remark := strings.TrimSpace(p.Remarks.String)
+		if remark != "" {
+			// v2rayN routing references remarks, keep the first match as the stable mapping.
+			if _, ok := remarkToTag[remark]; !ok {
+				remarkToTag[remark] = alias
+			}
 		}
 	}
 
@@ -469,4 +478,16 @@ func sanitizeTag(s string) string {
 		return "unknown"
 	}
 	return s
+}
+
+func uniqueAlias(useCount map[string]int, base string) string {
+	if base == "" {
+		base = "unknown"
+	}
+	count := useCount[base]
+	useCount[base] = count + 1
+	if count == 0 {
+		return base
+	}
+	return fmt.Sprintf("%s-%d", base, count+1)
 }

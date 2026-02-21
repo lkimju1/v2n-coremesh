@@ -6,9 +6,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/lkimju1/v2n-coremesh/internal/config"
+	"github.com/lkimju1/v2n-coremesh/internal/sysproxy"
 )
 
 type Process struct {
@@ -18,18 +20,32 @@ type Process struct {
 }
 
 func Run(cfg *config.File) error {
+	return RunWithAssetDir(cfg, "")
+}
+
+func RunWithAssetDir(cfg *config.File, assetDir string) error {
 	started := make([]Process, 0, len(cfg.Cores)+1)
+	restoreProxy := func() error { return nil }
+	proxyChanged := false
+	var cleanupOnce sync.Once
 	cleanup := func() {
-		for i := len(started) - 1; i >= 0; i-- {
-			p := started[i]
-			if p.cmd.Process != nil {
-				_ = p.cmd.Process.Kill()
+		cleanupOnce.Do(func() {
+			if err := restoreProxy(); err != nil {
+				fmt.Fprintf(os.Stderr, "[sysproxy] restore failed: %v\n", err)
+			} else if proxyChanged {
+				fmt.Printf("[sysproxy] restored previous system proxy settings\n")
 			}
-			select {
-			case <-p.doneCh:
-			case <-time.After(2 * time.Second):
+			for i := len(started) - 1; i >= 0; i-- {
+				p := started[i]
+				if p.cmd.Process != nil {
+					_ = p.cmd.Process.Kill()
+				}
+				select {
+				case <-p.doneCh:
+				case <-time.After(2 * time.Second):
+				}
 			}
-		}
+		})
 	}
 
 	for _, c := range cfg.Cores {
@@ -58,9 +74,12 @@ func Run(cfg *config.File) error {
 	xrayCmd := exec.Command(cfg.Xray.Bin, xrayArgs...)
 	xrayCmd.Stdout = os.Stdout
 	xrayCmd.Stderr = os.Stderr
+	if assetDir == "" {
+		assetDir = inferXrayAssetDir(cfg.Xray.Bin)
+	}
 	xrayCmd.Env = append(os.Environ(),
-		"XRAY_LOCATION_ASSET="+inferXrayAssetDir(cfg.Xray.Bin),
-		"XRAY_LOCATION_CERT="+inferXrayAssetDir(cfg.Xray.Bin),
+		"XRAY_LOCATION_ASSET="+assetDir,
+		"XRAY_LOCATION_CERT="+assetDir,
 	)
 	xrayDone := make(chan error, 1)
 	fmt.Printf("[xray] starting: %s %s\n", cfg.Xray.Bin, strings.Join(xrayArgs, " "))
@@ -77,6 +96,19 @@ func Run(cfg *config.File) error {
 		return fmt.Errorf("xray exited early: %w", err)
 	}
 	fmt.Printf("[xray] started\n")
+
+	proxyRestore, changed, err := sysproxy.ConfigureForRun(cfg.App.GeneratedXrayConfig)
+	if err != nil {
+		cleanup()
+		return fmt.Errorf("configure system proxy: %w", err)
+	}
+	restoreProxy = proxyRestore
+	proxyChanged = changed
+	if changed {
+		fmt.Printf("[sysproxy] enabled and pointed to xray inbound\n")
+	} else {
+		fmt.Printf("[sysproxy] unchanged (already configured or unsupported platform)\n")
+	}
 
 	if err := <-xrayDone; err != nil {
 		cleanup()

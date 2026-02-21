@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -29,4 +30,19 @@ func LoadRouting(path string) (*Routing, error) {
 		return nil, fmt.Errorf("parse routing config: %w", err)
 	}
 	return &cfg, nil
+}
+
+func LoadCustomRules(path string) ([]map[string]any, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read custom rules: %w", err)
+	}
+	var rules []map[string]any
+	if err := yaml.Unmarshal(b, &rules); err != nil {
+		return nil, fmt.Errorf("parse custom rules: %w", err)
+	}
+	return rules, nil
 }

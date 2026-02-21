@@ -52,6 +52,25 @@ func TestMainDuplicatePort(t *testing.T) {
 	}
 }
 
+func TestForRunChecksGeneratedConfig(t *testing.T) {
+	tmp := t.TempDir()
+	xrayBin := touchFile(t, tmp, "xray")
+	coreBin := touchFile(t, tmp, "core")
+	coreCfg := touchFile(t, tmp, "core.json")
+	generated := touchFile(t, tmp, "xray.generated.json")
+
+	cfg := &config.File{
+		App:  config.App{GeneratedXrayConfig: generated},
+		Xray: config.Xray{Bin: xrayBin},
+		Cores: []config.Core{
+			{Name: "c1", Bin: coreBin, Config: coreCfg},
+		},
+	}
+	if err := ForRun(cfg); err != nil {
+		t.Fatalf("unexpected run validate error: %v", err)
+	}
+}
+
 func touchFile(t *testing.T, dir, name string) string {
 	t.Helper()
 	p := filepath.Join(dir, name)

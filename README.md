@@ -1,6 +1,11 @@
 # v2n-coremesh
 
-`v2n-coremesh` orchestrates multiple cores first, then starts xray, and generates a runtime xray config automatically.
+`v2n-coremesh` has two subcommands:
+
+- `parse`: parse v2rayN and generate `xray.generated.json` + `coremesh.state.json`
+- `run`: ensure geo assets, start all cores first, then start xray
+
+Default config directory: `$HOME/.v2n_coremesh`
 
 ## Build
 
@@ -11,82 +16,55 @@ go build ./cmd/v2n-coremesh
 
 ## Usage
 
-### 1) Auto-load from v2rayN (recommended)
+### 1) parse
 
 ```bash
-./v2n-coremesh -v2rayn-home /path/to/v2rayN -dry-run
-./v2n-coremesh -v2rayn-home /path/to/v2rayN
+./v2n-coremesh parse -v2rayn-home /path/to/v2rayN
+./v2n-coremesh parse -v2rayn-home /path/to/v2rayN -conf-dir /custom/conf/dir
 ```
 
-`-v2rayn-home` should point to your v2rayN root directory (contains `guiConfigs/` and `bin/`).
+What `parse` does:
 
-### 2) Manual config file mode
+- Parses all custom cores from v2rayN (with active flag)
+- Reads xray base config
+- Appends non-active cores into xray `outbounds`
+- Prepends rules from `custom_rules.yaml` (if present) to `routing.rules`
+- Writes:
+  - `<conf-dir>/xray.generated.json`
+  - `<conf-dir>/coremesh.state.json`
+
+### 2) run
 
 ```bash
-./v2n-coremesh -config ./examples/config.yaml -dry-run
-./v2n-coremesh -config ./examples/config.yaml
+./v2n-coremesh run
+./v2n-coremesh run -conf-dir /custom/conf/dir
 ```
 
-### 3) Custom core routing example (multi-core)
+What `run` does:
 
-```bash
-./v2n-coremesh -config ./examples/custom-cores.config.yaml -dry-run
-./v2n-coremesh -config ./examples/custom-cores.config.yaml
-```
+- Checks `<conf-dir>/geosite.dat` and `<conf-dir>/geoip.dat`
+- Downloads missing/stale files (older than 30 days)
+- Starts all cores in order, then starts xray
+- Sets xray environment variables:
+  - `XRAY_LOCATION_ASSET=<conf-dir>`
+  - `XRAY_LOCATION_CERT=<conf-dir>`
 
-Example files:
-- `examples/custom-cores.config.yaml`
-- `examples/custom-cores.rules.yaml`
+On Windows, it also manages system proxy:
 
-Rule behavior in this example:
-- `baidu.com` -> `core-naive-a`
-- `qq.com` -> `core-naive-b`
-- `geosite:cn` and all unmatched traffic -> `direct`
+- Tries to set system proxy to an inbound endpoint from `xray.generated.json`
+- If system proxy is already enabled (including PAC), it does not modify anything
+- If proxy was set by this program, it restores previous settings on exit
+- `ProxyOverride` keeps existing entries and merges required bypass entries
 
-## Flags
-
-- `-v2rayn-home`: auto-parse v2rayN config + database (preferred)
-- `-config`: main config file path in manual mode (default: `./config.yaml`)
-- `-dry-run`: validate + generate xray config only, do not start processes
-
-## What `-dry-run` does
-
-It will:
-- load configuration / parse v2rayN
-- validate paths and port conflicts
-- generate `xray.generated.json`
-
-It will not:
-- start core processes
-- start xray process
-
-## Auto Mode Requirements (`-v2rayn-home`)
+## parse Input Requirements
 
 - `/path/to/v2rayN/guiConfigs/guiNConfig.json`
 - `/path/to/v2rayN/guiConfigs/guiNDB.db`
 - `/path/to/v2rayN/bin/xray/xray` (or `.exe` on Windows)
-- if rules include `geosite:*`, `/path/to/v2rayN/bin/geosite.dat` must exist
-- recommended: also provide `/path/to/v2rayN/bin/geoip.dat` (for geoip-based rules)
-- custom core configs must be JSON and include listen host/port (used for outbound mapping)
+- Custom core configs must expose a detectable listen address (for socks outbound injection)
 
-## Output
+## custom_rules.yaml
 
-- Auto mode default output: `/path/to/v2rayN/guiTemps/create_exe/xray.generated.json`
-- Manual mode output path: `app.generated_xray_config`
+Location: `<conf-dir>/custom_rules.yaml`
 
-## Common Errors
-
-- `v2rayN gui config not found`:
-  the `-v2rayn-home` path is incorrect, or `guiConfigs/guiNConfig.json` is missing
-- `v2rayN db not found`:
-  `guiConfigs/guiNDB.db` is missing
-- `cannot infer listen host:port`:
-  listen address is not detectable in the custom core config; update config format or use manual mode
-- `duplicate listen endpoint`:
-  multiple cores are configured with the same `host:port`
-
-## Notes
-
-- `xray.base_config` must be valid JSON.
-- `routing_rules_file` must reference existing `cores[].outbound_tag`.
-- `{{config}}` placeholder in args will be replaced with the generated config path.
+Format: YAML array, each item must match one xray `routing.rules[]` object.
