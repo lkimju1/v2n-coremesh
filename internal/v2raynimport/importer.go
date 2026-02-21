@@ -189,6 +189,13 @@ func filterCustomProfiles(profiles []profileRow) []profileRow {
 }
 
 func detectXrayBaseConfig(home string, guiCfg *guiConfig, profiles []profileRow) (string, error) {
+	// v2rayN runtime config is generated to binConfigs/config.json
+	runtimeConfig := filepath.Join(home, "binConfigs", "config.json")
+	if stat, err := os.Stat(runtimeConfig); err == nil && !stat.IsDir() {
+		return runtimeConfig, nil
+	}
+
+	// If runtime config is not present yet, try active custom xray profile source file.
 	if guiCfg != nil && guiCfg.IndexID != "" {
 		for _, p := range profiles {
 			if p.IndexID != guiCfg.IndexID || p.ConfigType != configTypeCustom {
@@ -210,11 +217,34 @@ func detectXrayBaseConfig(home string, guiCfg *guiConfig, profiles []profileRow)
 		}
 	}
 
-	fallback := filepath.Join(home, "guiConfigs", "config.json")
-	if stat, err := os.Stat(fallback); err == nil && !stat.IsDir() {
-		return fallback, nil
+	// Fallback: any custom xray profile source file in guiConfigs.
+	for _, p := range profiles {
+		if p.ConfigType != configTypeCustom {
+			continue
+		}
+		ct := int64(coreTypeXray)
+		if p.CoreType.Valid {
+			ct = p.CoreType.Int64
+		}
+		if ct != coreTypeXray {
+			continue
+		}
+		path := strings.TrimSpace(p.Address.String)
+		if !filepath.IsAbs(path) {
+			path = filepath.Join(home, "guiConfigs", path)
+		}
+		if stat, err := os.Stat(path); err == nil && !stat.IsDir() {
+			return path, nil
+		}
 	}
-	return "", fmt.Errorf("cannot detect xray base config, expected active custom xray profile or %s", fallback)
+
+	// Compatibility fallback: some packs include bin/config.json.
+	legacy := filepath.Join(home, "bin", "config.json")
+	if stat, err := os.Stat(legacy); err == nil && !stat.IsDir() {
+		return legacy, nil
+	}
+
+	return "", fmt.Errorf("cannot detect xray base config, expected one of %s, active custom xray source under guiConfigs, or %s", runtimeConfig, legacy)
 }
 
 func findXrayBin(home string) (string, error) {
@@ -258,10 +288,11 @@ func findCoreBinAndArgs(home string, coreType int64) (string, []string, error) {
 }
 
 func candidates(name string) []string {
+	// Keep cross-platform tolerance for parsing v2rayN home from another OS.
 	if runtime.GOOS == "windows" {
 		return []string{name + ".exe", name}
 	}
-	return []string{name}
+	return []string{name, name + ".exe"}
 }
 
 func inferListenFromConfig(path string) (string, int, error) {
@@ -287,6 +318,12 @@ func inferListenFromConfig(path string) (string, int, error) {
 		}
 		if listenRaw, ok := m["listen"].(string); ok {
 			h, p, ok := parseListenString(listenRaw)
+			if ok {
+				return h, p, nil
+			}
+		}
+		if listenArr, ok := m["listen"].([]any); ok {
+			h, p, ok := parseListenArray(listenArr)
 			if ok {
 				return h, p, nil
 			}
@@ -326,7 +363,7 @@ func parseListenString(s string) (string, int, bool) {
 		if err != nil {
 			return "", 0, false
 		}
-		h := u.Hostname()
+		h := normalizeHost(u.Hostname())
 		p, _ := strconv.Atoi(u.Port())
 		if h != "" && p > 0 {
 			return h, p, true
@@ -335,12 +372,50 @@ func parseListenString(s string) (string, int, bool) {
 	}
 	h, pStr, err := net.SplitHostPort(s)
 	if err == nil {
+		h = normalizeHost(h)
 		p, _ := strconv.Atoi(pStr)
 		if h != "" && p > 0 {
 			return h, p, true
 		}
 	}
 	return "", 0, false
+}
+
+func parseListenArray(listenArr []any) (string, int, bool) {
+	// Prefer socks endpoint when multiple protocols are exposed.
+	for _, it := range listenArr {
+		s, ok := it.(string)
+		if !ok {
+			continue
+		}
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(s)), "socks://") {
+			h, p, ok := parseListenString(s)
+			if ok {
+				return h, p, true
+			}
+		}
+	}
+	for _, it := range listenArr {
+		s, ok := it.(string)
+		if !ok {
+			continue
+		}
+		h, p, ok := parseListenString(s)
+		if ok {
+			return h, p, true
+		}
+	}
+	return "", 0, false
+}
+
+func normalizeHost(host string) string {
+	h := strings.TrimSpace(strings.Trim(host, "[]"))
+	switch h {
+	case "", "0.0.0.0", "::":
+		return "127.0.0.1"
+	default:
+		return h
+	}
 }
 
 func readRouting(db *sql.DB, remarkToTag map[string]string) (*config.Routing, error) {

@@ -51,12 +51,15 @@ func Main(cfg *config.File, routing *config.Routing) error {
 		listenSet[key] = struct{}{}
 	}
 	for _, r := range routing.Rules {
+		if isBuiltinOutboundTag(r.OutboundTag) {
+			continue
+		}
 		if _, ok := tagSet[r.OutboundTag]; !ok {
 			return fmt.Errorf("routing rule %q references unknown outbound_tag %q", r.Name, r.OutboundTag)
 		}
 	}
 	if routing.DefaultOutboundTag != "" {
-		if routing.DefaultOutboundTag != "direct" {
+		if !isBuiltinOutboundTag(routing.DefaultOutboundTag) {
 			if _, ok := tagSet[routing.DefaultOutboundTag]; !ok {
 				return fmt.Errorf("default_outbound_tag %q not found", routing.DefaultOutboundTag)
 			}
@@ -114,4 +117,13 @@ func inferXrayAssetDir(xrayBin string) string {
 		return parent
 	}
 	return dir
+}
+
+func isBuiltinOutboundTag(tag string) bool {
+	switch strings.ToLower(strings.TrimSpace(tag)) {
+	case "direct", "block", "proxy":
+		return true
+	default:
+		return false
+	}
 }
