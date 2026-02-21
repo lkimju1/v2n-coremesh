@@ -75,7 +75,7 @@ func LoadFromHome(home string) (*config.File, *config.Routing, error) {
 		return nil, nil, fmt.Errorf("no profiles found in v2rayN db")
 	}
 
-	xrayBase, err := detectXrayBaseConfig(home, guiCfg, profiles)
+	xrayBase, err := detectXrayBaseConfig(home)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -197,63 +197,48 @@ func filterCustomProfiles(profiles []profileRow) []profileRow {
 	return out
 }
 
-func detectXrayBaseConfig(home string, guiCfg *guiConfig, profiles []profileRow) (string, error) {
-	// v2rayN runtime config is generated to binConfigs/config.json
-	runtimeConfig := filepath.Join(home, "binConfigs", "config.json")
-	if stat, err := os.Stat(runtimeConfig); err == nil && !stat.IsDir() {
-		return runtimeConfig, nil
+func detectXrayBaseConfig(home string) (string, error) {
+	// configPre.json is generated for pre-service xray/sing-box. create_exe 2.0 requires this file explicitly.
+	runtimePreConfig := filepath.Join(home, "binConfigs", "configPre.json")
+	stat, err := os.Stat(runtimePreConfig)
+	if err != nil {
+		return "", fmt.Errorf("required xray base config not found: %s: %w", runtimePreConfig, err)
+	}
+	if stat.IsDir() {
+		return "", fmt.Errorf("required xray base config is a directory: %s", runtimePreConfig)
+	}
+	ok, err := looksLikeXrayConfig(runtimePreConfig)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", fmt.Errorf("required xray base config is not valid xray format: %s", runtimePreConfig)
+	}
+	return runtimePreConfig, nil
+}
+
+func looksLikeXrayConfig(path string) (bool, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return false, fmt.Errorf("read xray config candidate %s: %w", path, err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(b, &doc); err != nil {
+		return false, fmt.Errorf("parse xray config candidate %s: %w", path, err)
 	}
 
-	// If runtime config is not present yet, try active custom xray profile source file.
-	if guiCfg != nil && guiCfg.IndexID != "" {
-		for _, p := range profiles {
-			if p.IndexID != guiCfg.IndexID || p.ConfigType != configTypeCustom {
-				continue
-			}
-			ct := int64(coreTypeXray)
-			if p.CoreType.Valid {
-				ct = p.CoreType.Int64
-			}
-			if ct == coreTypeXray {
-				path := strings.TrimSpace(p.Address.String)
-				if !filepath.IsAbs(path) {
-					path = filepath.Join(home, "guiConfigs", path)
-				}
-				if stat, err := os.Stat(path); err == nil && !stat.IsDir() {
-					return path, nil
-				}
-			}
-		}
+	outbounds, hasOutbounds := doc["outbounds"].([]any)
+	routing, hasRouting := doc["routing"].(map[string]any)
+	if !hasOutbounds || !hasRouting {
+		return false, nil
 	}
-
-	// Fallback: any custom xray profile source file in guiConfigs.
-	for _, p := range profiles {
-		if p.ConfigType != configTypeCustom {
-			continue
-		}
-		ct := int64(coreTypeXray)
-		if p.CoreType.Valid {
-			ct = p.CoreType.Int64
-		}
-		if ct != coreTypeXray {
-			continue
-		}
-		path := strings.TrimSpace(p.Address.String)
-		if !filepath.IsAbs(path) {
-			path = filepath.Join(home, "guiConfigs", path)
-		}
-		if stat, err := os.Stat(path); err == nil && !stat.IsDir() {
-			return path, nil
-		}
+	if len(outbounds) == 0 {
+		return false, nil
 	}
-
-	// Compatibility fallback: some packs include bin/config.json.
-	legacy := filepath.Join(home, "bin", "config.json")
-	if stat, err := os.Stat(legacy); err == nil && !stat.IsDir() {
-		return legacy, nil
+	if _, ok := routing["rules"].([]any); !ok {
+		return false, nil
 	}
-
-	return "", fmt.Errorf("cannot detect xray base config, expected one of %s, active custom xray source under guiConfigs, or %s", runtimeConfig, legacy)
+	return true, nil
 }
 
 func findXrayBin(home string) (string, error) {

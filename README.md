@@ -60,6 +60,7 @@ On Windows, it also manages system proxy:
 
 - `/path/to/v2rayN/guiConfigs/guiNConfig.json`
 - `/path/to/v2rayN/guiConfigs/guiNDB.db`
+- `/path/to/v2rayN/binConfigs/configPre.json` (required; no fallback to `config.json`)
 - `/path/to/v2rayN/bin/xray/xray` (or `.exe` on Windows)
 - Custom core configs must expose a detectable listen address (for socks outbound injection)
 
