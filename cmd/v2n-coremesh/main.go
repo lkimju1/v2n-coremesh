@@ -1,13 +1,16 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/lkimju1/v2n-coremesh/internal/applog"
 	"github.com/lkimju1/v2n-coremesh/internal/assets"
 	"github.com/lkimju1/v2n-coremesh/internal/config"
 	"github.com/lkimju1/v2n-coremesh/internal/runner"
@@ -50,9 +53,16 @@ func runParse(args []string) error {
 	if strings.TrimSpace(*v2raynHome) == "" {
 		return fmt.Errorf("-v2rayn-home is required")
 	}
+	logger, err := applog.New(*confDir)
+	if err != nil {
+		return err
+	}
+	defer logger.Close()
+	logger.Printf("command=parse conf_dir=%s v2rayn_home=%s", *confDir, *v2raynHome)
 
 	mainCfg, routingCfg, err := v2raynimport.LoadFromHome(*v2raynHome)
 	if err != nil {
+		logger.Printf("parse failed: %v", err)
 		return err
 	}
 
@@ -61,21 +71,24 @@ func runParse(args []string) error {
 
 	customRules, err := config.LoadCustomRules(filepath.Join(*confDir, "custom_rules.yaml"))
 	if err != nil {
+		logger.Printf("load custom rules failed: %v", err)
 		return err
 	}
 	if err := validate.Main(mainCfg, routingCfg); err != nil {
+		logger.Printf("validate failed: %v", err)
 		return err
 	}
 	if err := xraygen.Generate(mainCfg, routingCfg, customRules); err != nil {
+		logger.Printf("generate xray config failed: %v", err)
 		return err
 	}
 	if err := state.Save(*confDir, state.New(*v2raynHome, mainCfg)); err != nil {
+		logger.Printf("save state failed: %v", err)
 		return err
 	}
-
-	fmt.Printf("generated xray config: %s\n", mainCfg.App.GeneratedXrayConfig)
-	fmt.Printf("state file: %s\n", state.Path(*confDir))
-	fmt.Printf("parsed cores: %d\n", len(mainCfg.Cores))
+	logger.Printf("generated xray config: %s", mainCfg.App.GeneratedXrayConfig)
+	logger.Printf("state file: %s", state.Path(*confDir))
+	logger.Printf("parsed cores: %d", len(mainCfg.Cores))
 	return nil
 }
 
@@ -85,20 +98,32 @@ func runRun(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-
-	stateFile, err := state.Load(*confDir)
+	logger, err := applog.New(*confDir)
 	if err != nil {
 		return err
 	}
+	defer logger.Close()
+	logger.Printf("command=run conf_dir=%s", *confDir)
+
+	stateFile, err := state.Load(*confDir)
+	if err != nil {
+		logger.Printf("load state failed: %v", err)
+		return err
+	}
 	cfg := &stateFile.Config
+	cfg.App.WorkDir = *confDir
 
 	if err := assets.EnsureGeoFiles(*confDir, time.Now()); err != nil {
+		logger.Printf("ensure geo files failed: %v", err)
 		return err
 	}
 	if err := validate.ForRun(cfg); err != nil {
+		logger.Printf("validate run config failed: %v", err)
 		return err
 	}
-	return runner.RunWithAssetDir(cfg, *confDir)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	return runner.RunWithAssetDir(ctx, cfg, *confDir, logger)
 }
 
 func exitErr(err error) {

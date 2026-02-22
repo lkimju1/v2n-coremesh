@@ -7,6 +7,13 @@
 
 Default config directory: `$HOME/.v2n_coremesh`
 
+Runtime logs are written to files under `<conf-dir>`:
+
+- `v2n-coremesh.log`: parse/run lifecycle logs and custom core process output
+- `xray.log`: xray process output
+
+The program does not emit runtime logs to standard output.
+
 ## Build
 
 ```bash
@@ -53,7 +60,7 @@ On Windows, it also manages system proxy:
 
 - Tries to set system proxy to an inbound endpoint from `xray.generated.json`
 - If system proxy is already enabled (including PAC), it does not modify anything
-- If proxy was set by this program, it restores previous settings on exit
+- If proxy was set by this program, it restores previous settings on exit (including Ctrl+C interruption)
 - `ProxyOverride` keeps existing entries and merges required bypass entries
 
 ## parse Input Requirements

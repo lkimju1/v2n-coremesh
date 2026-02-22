@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lkimju1/v2n-coremesh/internal/applog"
 	"github.com/lkimju1/v2n-coremesh/internal/config"
 	"github.com/lkimju1/v2n-coremesh/internal/sysproxy"
 )
@@ -20,20 +22,41 @@ type Process struct {
 }
 
 func Run(cfg *config.File) error {
-	return RunWithAssetDir(cfg, "")
+	return RunWithAssetDir(context.Background(), cfg, "", nil)
 }
 
-func RunWithAssetDir(cfg *config.File, assetDir string) error {
+func RunWithAssetDir(ctx context.Context, cfg *config.File, assetDir string, logger *applog.Logger) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	workDir := strings.TrimSpace(cfg.App.WorkDir)
+	if workDir == "" {
+		workDir = "."
+	}
 	started := make([]Process, 0, len(cfg.Cores)+1)
 	restoreProxy := func() error { return nil }
 	proxyChanged := false
+	xrayLogPath := filepath.Join(workDir, applog.XrayLogFileName)
+	xrayLog, err := applog.OpenXrayLog(workDir)
+	if err != nil {
+		return fmt.Errorf("open xray log: %w", err)
+	}
+	defer xrayLog.Close()
+
+	logf := func(format string, args ...any) {
+		if logger == nil {
+			return
+		}
+		logger.Printf(format, args...)
+	}
+
 	var cleanupOnce sync.Once
 	cleanup := func() {
 		cleanupOnce.Do(func() {
 			if err := restoreProxy(); err != nil {
-				fmt.Fprintf(os.Stderr, "[sysproxy] restore failed: %v\n", err)
+				logf("[sysproxy] restore failed: %v", err)
 			} else if proxyChanged {
-				fmt.Printf("[sysproxy] restored previous system proxy settings\n")
+				logf("[sysproxy] restored previous system proxy settings")
 			}
 			for i := len(started) - 1; i >= 0; i-- {
 				p := started[i]
@@ -47,16 +70,18 @@ func RunWithAssetDir(cfg *config.File, assetDir string) error {
 			}
 		})
 	}
+	defer cleanup()
 
 	for _, c := range cfg.Cores {
 		args := replaceConfigPlaceholder(c.Args, c.Config)
 		cmd := exec.Command(c.Bin, args...)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
+		if logger != nil && logger.Writer() != nil {
+			cmd.Stdout = logger.Writer()
+			cmd.Stderr = logger.Writer()
+		}
 		doneCh := make(chan error, 1)
-		fmt.Printf("[core] starting %s: %s %s\n", c.Name, c.Bin, strings.Join(args, " "))
+		logf("[core] starting %s: %s %s", c.Name, c.Bin, strings.Join(args, " "))
 		if err := cmd.Start(); err != nil {
-			cleanup()
 			return fmt.Errorf("start core %s failed: %w", c.Name, err)
 		}
 		go func() {
@@ -64,16 +89,15 @@ func RunWithAssetDir(cfg *config.File, assetDir string) error {
 		}()
 		started = append(started, Process{name: c.Name, cmd: cmd, doneCh: doneCh})
 		if err := waitHealthy(doneCh, 600*time.Millisecond); err != nil {
-			cleanup()
 			return fmt.Errorf("core %s exited early: %w", c.Name, err)
 		}
-		fmt.Printf("[core] started %s\n", c.Name)
+		logf("[core] started %s", c.Name)
 	}
 
 	xrayArgs := replaceConfigPlaceholder(cfg.Xray.Args, cfg.App.GeneratedXrayConfig)
 	xrayCmd := exec.Command(cfg.Xray.Bin, xrayArgs...)
-	xrayCmd.Stdout = os.Stdout
-	xrayCmd.Stderr = os.Stderr
+	xrayCmd.Stdout = xrayLog
+	xrayCmd.Stderr = xrayLog
 	if assetDir == "" {
 		assetDir = inferXrayAssetDir(cfg.Xray.Bin)
 	}
@@ -82,9 +106,9 @@ func RunWithAssetDir(cfg *config.File, assetDir string) error {
 		"XRAY_LOCATION_CERT="+assetDir,
 	)
 	xrayDone := make(chan error, 1)
-	fmt.Printf("[xray] starting: %s %s\n", cfg.Xray.Bin, strings.Join(xrayArgs, " "))
+	logf("[xray] starting: %s %s", cfg.Xray.Bin, strings.Join(xrayArgs, " "))
+	logf("[xray] log file: %s", xrayLogPath)
 	if err := xrayCmd.Start(); err != nil {
-		cleanup()
 		return fmt.Errorf("start xray failed: %w", err)
 	}
 	go func() {
@@ -92,30 +116,33 @@ func RunWithAssetDir(cfg *config.File, assetDir string) error {
 	}()
 	started = append(started, Process{name: "xray", cmd: xrayCmd, doneCh: xrayDone})
 	if err := waitHealthy(xrayDone, 600*time.Millisecond); err != nil {
-		cleanup()
 		return fmt.Errorf("xray exited early: %w", err)
 	}
-	fmt.Printf("[xray] started\n")
+	logf("[xray] started")
 
 	proxyRestore, changed, err := sysproxy.ConfigureForRun(cfg.App.GeneratedXrayConfig)
 	if err != nil {
-		cleanup()
 		return fmt.Errorf("configure system proxy: %w", err)
 	}
 	restoreProxy = proxyRestore
 	proxyChanged = changed
 	if changed {
-		fmt.Printf("[sysproxy] enabled and pointed to xray inbound\n")
+		logf("[sysproxy] enabled and pointed to xray inbound")
 	} else {
-		fmt.Printf("[sysproxy] unchanged (already configured or unsupported platform)\n")
+		logf("[sysproxy] unchanged (already configured or unsupported platform)")
 	}
 
-	if err := <-xrayDone; err != nil {
-		cleanup()
-		return fmt.Errorf("xray exited with error: %w", err)
+	select {
+	case err := <-xrayDone:
+		if err != nil {
+			return fmt.Errorf("xray exited with error: %w", err)
+		}
+		logf("[xray] exited")
+		return nil
+	case <-ctx.Done():
+		logf("[run] shutdown requested: %v", ctx.Err())
+		return nil
 	}
-	cleanup()
-	return nil
 }
 
 func waitHealthy(doneCh <-chan error, grace time.Duration) error {
