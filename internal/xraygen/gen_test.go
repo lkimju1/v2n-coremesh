@@ -43,8 +43,7 @@ func TestGenerateInjectsOutboundsAndRules(t *testing.T) {
 		},
 	}
 	routingCfg := &config.Routing{
-		Rules:              []config.RoutingRule{{Name: "r1", Domain: []string{"domain:example.com"}, OutboundTag: "core-a"}},
-		DefaultOutboundTag: "direct",
+		Rules: []config.RoutingRule{{Name: "r1", Domain: []string{"domain:example.com"}, OutboundTag: "core-a"}},
 	}
 	customRules := []map[string]any{
 		{
@@ -82,12 +81,21 @@ func TestGenerateInjectsOutboundsAndRules(t *testing.T) {
 		t.Fatalf("routing missing: %#v", doc["routing"])
 	}
 	rules, ok := routing["rules"].([]any)
-	if !ok || len(rules) != 4 {
+	if !ok || len(rules) != 3 {
 		t.Fatalf("unexpected rules: %#v", routing["rules"])
 	}
 	first := rules[0].(map[string]any)
 	if first["outboundTag"] != "core-a" {
 		t.Fatalf("first rule should be custom rule: %#v", first)
+	}
+	for _, rule := range rules {
+		m, ok := rule.(map[string]any)
+		if !ok {
+			continue
+		}
+		if m["network"] == "tcp,udp" {
+			t.Fatalf("unexpected catch-all rule appended: %#v", m)
+		}
 	}
 }
 

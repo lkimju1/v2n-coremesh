@@ -56,7 +56,7 @@ func Generate(mainCfg *config.File, routingCfg *config.Routing, customRules []ma
 
 	routing := ensureObject(doc, "routing")
 	baseRules := ensureArrayFromObject(routing, "rules")
-	rules := make([]any, 0, len(customRules)+len(routingCfg.Rules)+len(baseRules)+1)
+	rules := make([]any, 0, len(customRules)+len(routingCfg.Rules)+len(baseRules))
 	for _, rule := range customRules {
 		rules = append(rules, rule)
 	}
@@ -68,13 +68,6 @@ func Generate(mainCfg *config.File, routingCfg *config.Routing, customRules []ma
 		})
 	}
 	rules = append(rules, baseRules...)
-	if routingCfg.DefaultOutboundTag != "" {
-		rules = append(rules, map[string]any{
-			"type":        "field",
-			"network":     "tcp,udp",
-			"outboundTag": routingCfg.DefaultOutboundTag,
-		})
-	}
 	routing["rules"] = rules
 	doc["routing"] = routing
 
