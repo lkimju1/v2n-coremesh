@@ -28,6 +28,7 @@ go build ./cmd/v2n-coremesh
 ```bash
 ./v2n-coremesh parse -v2rayn-home /path/to/v2rayN
 ./v2n-coremesh parse -v2rayn-home /path/to/v2rayN -conf-dir /custom/conf/dir
+./v2n-coremesh p -v /path/to/v2rayN -c /custom/conf/dir
 ```
 
 What `parse` does:
@@ -45,6 +46,8 @@ What `parse` does:
 ```bash
 ./v2n-coremesh run
 ./v2n-coremesh run -conf-dir /custom/conf/dir
+./v2n-coremesh run --bind-all
+./v2n-coremesh r -c /custom/conf/dir -a
 ```
 
 What `run` does:
@@ -55,6 +58,13 @@ What `run` does:
 - Sets xray environment variables:
   - `XRAY_LOCATION_ASSET=<conf-dir>`
   - `XRAY_LOCATION_CERT=<conf-dir>`
+
+`--bind-all` runtime option:
+
+- Default behavior: bind to local addresses from existing configs (usually `127.0.0.1`)
+- When `--bind-all` is enabled, runtime copies of xray/core config files are generated under `<conf-dir>/runtime_bind_all`
+- All detected `listen` fields in those runtime copies are rewritten to `0.0.0.0`
+- Original config files are not modified
 
 On Windows, it also manages system proxy:
 

@@ -1,0 +1,8 @@
+- type: field
+  outboundTag: customproxy
+  domain:
+    - "geosite:google"
+    - "geosite:openai"
+    - "geosite:anthropic"
+    - "geosite:cloudflare"
+    - "domain:tailscale.com"
